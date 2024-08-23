@@ -44,6 +44,7 @@ def generate_user_data():
 # Generate Channels/Groups/Handles
 @st.cache_data
 def generate_channel_data():
+    platforms = ['Telegram', 'WhatsApp', 'Instagram']
     return pd.DataFrame({
         'channel_id': range(1, num_channels + 1),
         'name': [fake.word() + random.choice(['_drugs', '_shop', '_market', '_group', '_chat']) for _ in range(num_channels)],
@@ -52,6 +53,7 @@ def generate_channel_data():
         'members_count': [random.randint(50, 10000) for _ in range(num_channels)],
         'activity_level': [random.choice(['low', 'medium', 'high']) for _ in range(num_channels)],
         'is_private': [random.choice([True, False]) for _ in range(num_channels)],
+        'platform': [random.choice(platforms) for _ in range(num_channels)],
     })
 
 # Generate Messages/Posts
@@ -65,7 +67,7 @@ def generate_message_data(users_df, channels_df):
 
     messages = pd.DataFrame({
         'message_id': range(1, num_messages + 1),
-        'timestamp': [fake.date_time_this_year() for _ in range(num_messages)],
+        'timestamp': [fake.date_time_between(start_date='-2y', end_date='now') for _ in range(num_messages)],
         'sender_id': [random.choice(users_df['user_id']) for _ in range(num_messages)],
         'channel_id': [random.choice(channels_df['channel_id']) for _ in range(num_messages)],
         'content': [generate_content() for _ in range(num_messages)],
@@ -73,6 +75,10 @@ def generate_message_data(users_df, channels_df):
     })
     
     messages['is_drug_related'] = messages['content'].apply(lambda x: 1 if any(keyword in x.lower() for keyword in drug_keywords) else 0)
+    
+    # Merge with channels_df to get platform information
+    messages = messages.merge(channels_df[['channel_id', 'platform']], on='channel_id', how='left')
+    
     return messages
 
 # Train ML model
@@ -100,7 +106,11 @@ def main():
     # Sidebar
     st.sidebar.title("Settings")
     platform = st.sidebar.selectbox("Select Platform", ["All", "Telegram", "WhatsApp", "Instagram"])
-    date_range = st.sidebar.date_input("Select Date Range", [pd.Timestamp.now() - pd.Timedelta(days=30), pd.Timestamp.now()])
+
+    date_range = st.sidebar.date_input("Select Date Range", 
+                                    [pd.Timestamp.now() - pd.Timedelta(days=365), pd.Timestamp.now()],
+                                    min_value=pd.Timestamp.now() - pd.Timedelta(days=730),
+                                    max_value=pd.Timestamp.now())
     
     # Generate data
     users_df = generate_user_data()
@@ -112,9 +122,9 @@ def main():
     
     # Filter data based on sidebar inputs
     if platform != "All":
-        channels_df = channels_df[channels_df['name'].str.contains(platform.lower())]
-        messages_df = messages_df[messages_df['channel_id'].isin(channels_df['channel_id'])]
-    
+        channels_df = channels_df[channels_df['platform'] == platform]
+        messages_df = messages_df[messages_df['platform'] == platform]
+
     messages_df = messages_df[(messages_df['timestamp'].dt.date >= date_range[0]) & (messages_df['timestamp'].dt.date <= date_range[1])]
 
     # Main content
